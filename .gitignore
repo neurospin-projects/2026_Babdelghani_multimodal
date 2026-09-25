@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Checkpoints, datasets, logs
+*.pth
+*.pt
+*.npy
+*.npz
+*.pkl
+*.hdf5
+*.tar.gz*
+results/
+Output/
+runs/
+tb_logs/
+*.log
+
+# Generated figures
+*.png
+*.pdf
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

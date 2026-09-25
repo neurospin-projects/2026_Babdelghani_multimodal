@@ -1,0 +1,185 @@
+# Pareto Frontier SSL — Central Configuration
+# Edit this file to change any hyperparameter.
+# benchmark.py loads it at startup; no Python file needs touching for tuning.
+
+# Method registry
+methods:
+  simclr_both:         "SimCLR independently on M1 and M2"
+  clip:                "Cross-modal InfoNCE  M1↔M2  (CLIP)"
+  gmc:                 "GMC: each mod vs joint  (CoMM MMFusion encoder)"
+  comm:                "CoMM: each mod vs joint + within-modal  (CoMM MMFusion encoder)"
+  factorcl_heads:      "FactorCL-Heads: explicit redundant + conditional unique (oracle head per task)"
+  factorcl:            "FactorCL: shared+unique heads concatenated — real-deployment baseline"
+  simclr_single_per_batch:       "SimCLR-Lambda: InfoNCE shared + SimCLR unique, interpolated by lambda"
+  factorcl_warmup:     "FactorCL-Warmup: FactorCL-Lambda with phased λ curriculum (shared-first)"
+  simclr_lora_linear:  "LoRA-Linear: LoRA proj head 2-branch, endpoint training (approach 4 linear)"
+  simclr_lora_curve:   "LoRA-Curve: LoRA proj head 3-branch + fix3 warmup (approach 4 curve)"
+  simclr_lora_enc_linear: "LoRA-Enc-Linear: LoRA encoder+proj 2-branch (approach 5 linear)"
+  simclr_lora_enc_curve:  "LoRA-Enc-Curve: LoRA encoder+proj 3-branch + fix3 warmup (approach 5 curve)"
+  simclr_lora_simplex: "LoRA-Simplex: PaLoRA 2-simplex over 3 objectives (R, U1, U2), side-5 grid, linear only"
+  simclr_lora_enc_simplex: "LoRA-Enc-Simplex: LoRA-Simplex with LoRA also in the encoder classifier"
+  simclr_simplex4h:      "Simplex-4H: 4 plain heads, simplex mixes head OUTPUTS after L2-norm (no LoRA)"
+  simclr_simplex4h_norm: "Simplex-4H-norm: same, but mixes RAW head outputs and normalises once"
+  simclr_simplex6h:      "Simplex-6H: 3 heads per modality, TRUE 3-way blend (every coordinate reaches every modality)"
+  simclr_simplex_enc_decomp_R:   "Decomp-R: LoRA-enc simplex + 4 plain heads, L_U decorrelated from R via CLUB, concat readout"
+  simclr_simplex_proj_decomp_R:  "Decomp-R (proj): lambda-blind encoder + 4 LoRA heads, same CLUB decomposition and concat readout"
+  simclr_simplex_both_decomp_R:  "Decomp-R (both): LoRA in the encoder AND the 4 heads -- lambda applied twice (multiplicative), tests whether proj's accuracy and enc's preference axis combine"
+  # -- disabled for now (grid + L_smooth/L_diversity methods) --
+  # hyper_lambda:        "Hyper-Lambda: FactorCL on multi-lambda grid + L_smooth + L_diversity"
+  # simclr_grid_per_batch:        "SimCLR-Hyper: SimCLR loss on multi-lambda grid + L_smooth + L_diversity (no CLUB)"
+
+# Inference mode for each method:
+#   unimodal_split  — enc_m1(M1) for share/unique1, enc_m2(M2) for unique2
+#   mmfusion_joint  — CoMMFusion([M1,M2]) CLS token
+#   factorcl_heads  — task-specific projection heads
+#   lambda_sweep    — two heads (proj_r / proj_u), interpolated at probe time
+inference_mode:
+  simclr_both:         unimodal_split
+  clip:                unimodal_split
+  gmc:                 mmfusion_joint
+  comm:                mmfusion_joint
+  factorcl_heads:      factorcl_heads
+  factorcl:            factorcl_concat
+  simclr_single_per_batch:       lambda_sweep
+  factorcl_warmup:     lambda_sweep
+  simclr_lora_linear:  lora_sweep
+  simclr_lora_curve:   lora_sweep
+  simclr_lora_enc_linear: lora_enc_sweep
+  simclr_lora_enc_curve:  lora_enc_sweep
+  simclr_lora_simplex: lora_sweep
+  simclr_lora_enc_simplex: lora_enc_sweep
+  simclr_simplex4h:      lambda_sweep
+  simclr_simplex4h_norm: lambda_sweep
+  simclr_simplex6h:      lambda_sweep
+  # hyper_lambda:        lambda_sweep
+  # simclr_grid_per_batch:        lambda_sweep
+
+# Methods that reuse another method's checkpoints — no training needed.
+# Key: method name  →  Value: method whose out_dir/checkpoints to load from.
+checkpoint_alias:
+  factorcl: factorcl_heads
+
+# Methods routed to probe_lambda_cond instead of probe_method
+lambda_methods:
+  - simclr_single_per_batch
+  - factorcl_warmup
+  - simclr_lora_linear
+  - simclr_lora_curve
+  - simclr_lora_enc_linear
+  - simclr_lora_enc_curve
+  - simclr_lora_simplex
+  - simclr_lora_enc_simplex
+  - simclr_simplex4h
+  - simclr_simplex4h_norm
+  - simclr_simplex6h
+  - simclr_simplex_enc_decomp_R
+  - simclr_simplex_proj_decomp_R
+  - simclr_simplex_both_decomp_R
+  # - hyper_lambda
+  # - simclr_grid_per_batch
+
+# Methods that use CoMM's MMFusion for both training and probing
+comm_methods:
+  - gmc
+  - comm
+
+# Lambda grid (hyper_lambda: fixed λ values evaluated per batch)
+lambda_grid:
+  - 0.0
+  - 0.25
+  - 0.5
+  - 0.75
+  - 1.0
+
+# Paths
+# 15-shapes is now the only trifeature dataset in use (10-shapes corr00/corr50
+# retired). These defaults match the config that produced
+# pareto_ssl/results_15shapes/results.json.
+paths:
+  data_dir: CoMM/data/trifeatures_15shapes_corr00
+  out_dir:  pareto_ssl/results_15shapes
+
+# Default training hyperparameters
+training:
+  epochs:      100
+  lr:          0.0003
+  batch_size:  128
+  latent_dim:  512
+  proj_dim:    256
+  probe_shots: 1
+  train_seed:  42
+  device:      auto   # "auto" → cuda if available, else cpu | "cuda" | "cpu"
+
+# Loss weights
+loss_weights:
+  # Weight for the CLUB disentanglement term inside L_U:
+  #   L_U = NT-Xent(z_u_a, z_u_b) + lam_club * clamp(CLUB(z_u, z_r), min=0)
+  lam_club:     0.5
+
+  # Regularisation weights for hyper_lambda
+  alpha_smooth: 0.1   # L_smooth:    penalise non-linear variation along the λ curve
+  beta_div:     0.05  # L_diversity: penalise all z_λ collapsing to the same point
+
+# Lambda sampling
+# Controls how λ is drawn from p(λ) during training.
+#
+#   dist: uniform
+#     λ ~ Uniform(0, 1)  — every value equally likely  [original behaviour]
+#
+#   dist: dirichlet
+#     λ ~ Beta(α, α)  [marginal of Dirichlet([α, α]) on the 2-simplex]
+#     alpha < 1  → bimodal; mass near 0 and 1 → encourages specialisation
+#     alpha = 1  → identical to Uniform(0, 1)
+#     alpha > 1  → unimodal; mass near 0.5  → encourages balanced trade-off
+#
+#   dist: warmup
+#     Phased curriculum from lambda_warmup.phases below.
+#     Applies to any method — hyper_lambda also weights its grid by the PDF.
+#
+# Reference: Navon et al. (2020) "Learning the Pareto Front with Hypernetworks"
+lambda_sampling:
+  dist:             uniform   # "uniform" | "dirichlet" | "beta" | "warmup"
+  dirichlet_alpha:  0.3       # used only when dist: dirichlet or beta
+
+# Architecture defaults
+architecture:
+  film_hidden:   64
+  dropout:       0.5
+  encoder_param: encoder   # "projection" | "encoder"  (hyper_lambda only)
+
+# Run defaults
+# These mirror the CLI flags. CLI always overrides config.
+# Boolean flags: setting true here makes the behaviour permanent for every run.
+run:
+  default_methods: null   # null = all methods in registry; or list e.g. [hyper_lambda, factorcl]
+  skip_training:   false  # skip training, probe only (requires existing checkpoints)
+  reprobe_all:     false  # re-probe every checkpointed method after training
+  plot_only:       false  # only regenerate the Pareto plot from existing results.json
+
+# Pareto solver
+# "ls"  → linear scalarization: loss = 2λ·L_R + 2(1-λ)·L_U  (fast, default)
+# "epo" → Exact Pareto Optimality: solves a small LP per step to find the
+#          optimal gradient combination. Requires cvxpy and cvxopt.
+#          Slower (~10-20 % per step) but Pareto-exact by construction.
+pareto_solver: ls
+
+# Lambda warmup schedule
+# Phased λ curriculum — activated via  dist: warmup  above.
+# Motivation: CLUB needs a converged z_r before it can disentangle z_u.
+# Starting with shared-biased λ (Beta(5,1)) lets z_r stabilise first.
+#
+# Each phase covers `frac` of total training epochs (must sum to 1.0).
+# Supported dist values: "beta" (asymmetric, needs alpha+beta), "uniform".
+lambda_warmup:
+  # fracs MUST sum to exactly 1.0 — code validates this at startup.
+  phases:
+    - frac:  0.20
+      dist:  beta
+      alpha: 5.0
+      beta:  1.0     # Beta(5,1) — λ biased near 1 → shared-first warm-up
+    - frac:  0.60
+      dist:  uniform  # Uniform(0,1) — balanced exploration
+    - frac:  0.20
+      dist:  beta
+      alpha: 0.5
+      beta:  0.5     # Beta(0.5,0.5) — bimodal, pushes toward both endpoints
